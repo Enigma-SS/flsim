@@ -59,28 +59,32 @@ class Client(object):
         else:
             self.trainset = data
 
-    def set_link(self, config):
+    def set_gateway(self, gateway_id):
+        self.gateway = gateway_id
+
+    def set_link_to_gateway(self, config):
         # Set the Gaussian distribution for link speed in Kbytes
-        self.speed_min = config.link.min
-        self.speed_max = config.link.max
+        self.speed_min = config.network.gateway_client.get('min')
+        self.speed_max = config.network.gateway_client.get('max')
         self.speed_mean = random.uniform(self.speed_min, self.speed_max)
-        self.speed_std = config.link.std
+        self.speed_std = config.network.gateway_client.get('std')
 
         # Set model size
         model_path = config.paths.model + '/global'
         if os.path.exists(model_path):
             self.model_size = os.path.getsize(model_path) / 1e3  # model size in Kbytes
         else:
-            self.model_size = 1600  # estimated model size in Kbytes
+            self.model_size = config.model.size  # estimated model size in Kbytes
 
         # Set estimated delay
         self.est_delay = self.model_size / self.speed_mean
 
-    def set_delay(self):
+    def set_delay_to_gateway(self):
         # Set the link speed and delay for the upcoming run
         link_speed = random.normalvariate(self.speed_mean, self.speed_std)
         link_speed = max(min(link_speed, self.speed_max), self.speed_min)
         self.delay = self.model_size / link_speed  # upload delay in sec
+        self.throughput = link_speed
 
     def configure(self, config):
         import fl_model  # pylint: disable=import-error
@@ -104,6 +108,9 @@ class Client(object):
 
         # Create optimizer
         self.optimizer = fl_model.get_optimizer(self.model)
+
+        # Set delay
+        self.set_delay_to_gateway()
 
     def async_configure(self, config, download_time):
         import fl_model  # pylint: disable=import-error

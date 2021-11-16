@@ -50,7 +50,11 @@ class Config(object):
         self.fl = namedtuple('fl', fields)(*params)
 
         # -- Model --
-        self.model = config['model']
+        fields = ['name', 'size']
+        defaults = ('MNIST', 1600)
+        params = [config['model'].get(field, defaults[i])
+                  for i, field in enumerate(fields)]
+        self.model = namedtuple('model', fields)(*params)
 
         # -- Paths --
         fields = ['data', 'model', 'reports', 'plot']
@@ -58,7 +62,7 @@ class Config(object):
         params = [config['paths'].get(field, defaults[i])
                   for i, field in enumerate(fields)]
         # Set specific model path
-        params[fields.index('model')] += '/' + self.model
+        params[fields.index('model')] += '/' + self.model.name
 
         self.paths = namedtuple('paths', fields)(*params)
 
@@ -68,16 +72,16 @@ class Config(object):
         # -- Async --
         fields = ['alpha', 'staleness_func']
         defaults = (0.9, 'constant')
-        params = [config['async'].get(field, defaults[i])
+        params = [config['async_params'].get(field, defaults[i])
                   for i, field in enumerate(fields)]
-        self.sync = namedtuple('sync', fields)(*params)
+        self.async_params = namedtuple('async_params', fields)(*params)
 
-        # -- Link Speed --
-        fields = ['min', 'max', 'std']
-        defaults = (200, 5000, 100)
-        params = [config['link_speed'].get(field, defaults[i])
+        # -- Network --
+        fields = ['gateway_total', 'cloud_gateway', 'gateway_client']
+        defaults = (5, 0, 0)
+        params = [config['network'].get(field, defaults[i])
                   for i, field in enumerate(fields)]
-        self.link = namedtuple('link_speed', fields)(*params)
+        self.network = namedtuple('network', fields)(*params)
 
         # -- Plot interval --
         self.plot_interval = config['plot_interval']

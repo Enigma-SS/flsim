@@ -9,7 +9,6 @@ from threading import Thread
 import torch
 import utils.dists as dists  # pylint: disable=no-name-in-module
 
-
 class Server(object):
     """Basic federated learning server."""
 
@@ -64,7 +63,7 @@ class Server(object):
         import fl_model  # pylint: disable=import-error
 
         model_path = self.config.paths.model
-        model_type = self.config.model
+        model_type = self.config.model.name
 
         logging.info('Model: {}'.format(model_type))
 

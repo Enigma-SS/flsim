@@ -1,4 +1,7 @@
 import logging
+import gateway
+import client
+import sys
 import pickle
 import random
 import math
@@ -46,20 +49,71 @@ class Group(object):
 class SyncServer(Server):
     """Synchronous federated learning server."""
 
-    def make_clients(self, num_clients):
+    def boot(self):
+        logging.info('Booting {} server...'.format(self.config.server))
+
+        model_path = self.config.paths.model
+        total_clients = self.config.clients.total
+        total_gateways = self.config.network.gateway_total
+
+        # Add fl_model to import path
+        sys.path.append(model_path)
+
+        # Set up simulated server
+        self.load_data()
+        self.load_model()
+        self.make_gateways(total_gateways)
+        self.make_clients(total_clients, self.gateways)
+        self.set_link()
+
+
+    def make_clients(self, num_clients, gateways):
         super().make_clients(num_clients)
 
         # Set link speed for clients
         speed = []
         for client in self.clients:
-            client.set_link(self.config)
-            speed.append(client.speed_mean)
+            # Randomly associate client with a gateway
+            gateway_id = random.randint(0, len(gateways) - 1)
+            gateways[gateway_id].add_client(client.client_id)
+            client.set_gateway(gateway_id)
 
         logging.info('Speed distribution: {} Kbps'.format([s for s in speed]))
 
         # Initiate client profile of loss and delay
         self.profile = Profile(num_clients)
         self.profile.set_primary_label([client.pref for client in self.clients])
+
+    def make_gateways(self, num_gws):
+        gateways = []
+        for gateway_id in range(num_gws):
+            # Create new gateway
+            new_gw = gateway.Gateway(gateway_id)
+            gateways.append(new_gw)
+
+        self.gateways = gateways
+
+    def set_link(self):
+        # Set the network link between cloud and gateway
+        speed_cloud_gateway = []
+        for gateway in self.gateways:
+            gateway.set_link_to_cloud(self.config)
+            speed_cloud_gateway.append(gateway.speed_mean)
+
+        logging.info('Speed cloud-gw distribution: {} Kbps'.format([s for s in speed_cloud_gateway]))
+
+        speed_gateway_client = []
+        for client in self.clients:
+            client.set_link_to_gateway(self.config)
+            speed_gateway_client.append(client.speed_mean)
+
+        logging.info('Speed distribution: {} Kbps'.format([s for s in speed_gateway_client]))
+
+    def configuration(self, sample_clients, sample_gateways):
+        super().configuration(sample_clients)
+
+        for gateway_id in sample_gateways:
+            self.gateways[gateway_id].configure(self.config)
 
     # Run synchronous federated learning
     def run(self):
@@ -102,21 +156,14 @@ class SyncServer(Server):
         import fl_model  # pylint: disable=import-error
 
         # Select clients to participate in the round
-        sample_groups = self.selection()
-        sample_clients, throughput = [], []
-        for group in sample_groups:
-            for client in group.clients:
-                client.set_delay()
-                sample_clients.append(client)
-                throughput.append(client.model_size / client.delay)
-            group.set_download_time(T_old)
-            group.set_aggregate_time()
-        self.throughput = sum([t for t in throughput])
+        sample_clients, sample_gateways = self.selection()
 
+        # Configure sample clients, including delay and throughput
+        self.configuration(sample_clients, sample_gateways)
+        throughput = [client.throughput for client in sample_clients]
+        self.throughput = sum([t for t in throughput])
         logging.info('Avg throughput {} kB/s'.format(self.throughput))
 
-        # Configure sample clients
-        self.configuration(sample_clients)
         # Use the max delay in all sample clients as the delay in sync round
         max_delay = max([c.delay for c in sample_clients])
 
@@ -171,10 +218,10 @@ class SyncServer(Server):
         sample_clients = [client for client in random.sample(
             self.clients, clients_per_round)]
 
-        # In sync case, create one group of all selected clients
-        sample_groups = [Group([client for client in sample_clients])]
+        # Find out the associated gateways
+        sample_gateways = list(set([client.gateway for client in sample_clients]))
 
-        return sample_groups
+        return sample_clients, sample_gateways
 
     def update_profile(self, reports):
         for report in reports:

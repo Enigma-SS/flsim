@@ -90,8 +90,8 @@ class AsyncServer(Server):
         reports_path = self.config.paths.reports
 
         # Init async parameters
-        self.alpha = self.config.sync.alpha
-        self.staleness_func = self.config.sync.staleness_func
+        self.alpha = self.config.async_params.alpha
+        self.staleness_func = self.config.async_params.staleness_func
 
         # Init self accuracy records
         self.records = Record()
