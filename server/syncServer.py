@@ -1,50 +1,11 @@
 import logging
-import gateway
-import client
 import sys
 import pickle
 import random
 import math
 from threading import Thread
-from server import Server
+from server import Server, gateway
 from .record import Record, Profile
-
-class Group(object):
-    """Basic async group."""
-    def __init__(self, client_list):
-        self.clients = client_list
-
-    def set_download_time(self, download_time):
-        self.download_time = download_time
-
-    def set_aggregate_time(self):
-        """Only run after client configuration"""
-        assert (len(self.clients) > 0), "Empty clients in group init!"
-        self.delay = max([c.delay for c in self.clients])
-        self.aggregate_time = self.download_time + self.delay
-
-        # Get average throughput contributed by this group
-        assert (self.clients[0].model_size > 0), "Zero model size in group init!"
-        self.throughput = len(self.clients) * self.clients[0].model_size / \
-                self.aggregate_time
-
-    def __eq__(self, other):
-        return self.aggregate_time == other.aggregate_time
-
-    def __ne__(self, other):
-        return self.aggregate_time != other.aggregate_time
-
-    def __lt__(self, other):
-        return self.aggregate_time < other.aggregate_time
-
-    def __le__(self, other):
-        return self.aggregate_time <= other.aggregate_time
-
-    def __gt__(self, other):
-        return self.aggregate_time > other.aggregate_time
-
-    def __ge__(self, other):
-        return self.aggregate_time >= other.aggregate_time
 
 class SyncServer(Server):
     """Synchronous federated learning server."""
@@ -65,7 +26,6 @@ class SyncServer(Server):
         self.make_gateways(total_gateways)
         self.make_clients(total_clients, self.gateways)
         self.set_link()
-
 
     def make_clients(self, num_clients, gateways):
         super().make_clients(num_clients)
@@ -88,7 +48,7 @@ class SyncServer(Server):
         gateways = []
         for gateway_id in range(num_gws):
             # Create new gateway
-            new_gw = gateway.Gateway(gateway_id)
+            new_gw = gateway.Gateway(gateway_id, self.config)
             gateways.append(new_gw)
 
         self.gateways = gateways
@@ -160,8 +120,7 @@ class SyncServer(Server):
 
         # Configure sample clients, including delay and throughput
         self.configuration(sample_clients, sample_gateways)
-        throughput = [client.throughput for client in sample_clients]
-        self.throughput = sum([t for t in throughput])
+        self.throughput = sum([client.throughput for client in sample_clients])
         logging.info('Avg throughput {} kB/s'.format(self.throughput))
 
         # Use the max delay in all sample clients as the delay in sync round

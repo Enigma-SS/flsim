@@ -60,7 +60,7 @@ class Client(object):
             self.trainset = data
 
     def set_gateway(self, gateway_id):
-        self.gateway = gateway_id
+        self.gateway_id = gateway_id
 
     def set_link_to_gateway(self, config):
         # Set the Gaussian distribution for link speed in Kbytes
@@ -112,7 +112,7 @@ class Client(object):
         # Set delay
         self.set_delay_to_gateway()
 
-    def async_configure(self, config, download_time):
+    """def async_global_configure(self, config, download_time):
         import fl_model  # pylint: disable=import-error
 
         # Extract from config
@@ -127,7 +127,7 @@ class Client(object):
         self.batch_size = config.fl.batch_size
 
         # Download most recent global model
-        path = model_path + '/global_' + '{}'.format(download_time)
+        path = model_path + '/global_{}'.format(download_time)
         self.model = fl_model.Net()
         self.model.load_state_dict(torch.load(path))
         self.model.eval()
@@ -136,6 +136,35 @@ class Client(object):
         # Create optimizer
         self.optimizer = fl_model.get_optimizer(self.model)
 
+        # Set delay
+        self.set_delay_to_gateway()"""
+
+    def async_local_configure(self, config, download_time):
+        import fl_model  # pylint: disable=import-error
+
+        # Extract from config
+        model_path = self.model_path = config.paths.model
+
+        # Download from server
+        config = self.download(config)
+
+        # Extract machine learning task from config
+        self.task = config.fl.task
+        self.epochs = config.fl.epochs
+        self.batch_size = config.fl.batch_size
+
+        # Download most recent global model
+        path = model_path + '/gateway{}_{}'.format(self.gateway_id, download_time)
+        self.model = fl_model.Net()
+        self.model.load_state_dict(torch.load(path))
+        self.model.eval()
+        logging.info('Load gateway {} model: {}'.format(self.gateway_id, path))
+
+        # Create optimizer
+        self.optimizer = fl_model.get_optimizer(self.model)
+
+        # Set delay
+        self.set_delay_to_gateway()
 
     def run(self, reg=None):
         # Perform federated learning task
@@ -163,10 +192,7 @@ class Client(object):
         weights = fl_model.extract_weights(self.model)
 
         # Generate report for server
-        self.report = Report(self)
-        self.report.weights = weights
-        self.report.loss = self.loss
-        self.report.delay = self.delay
+        self.report = Report(self, weights, self.loss, self.delay, self.throughput)
 
         # Perform model testing if applicable
         if self.do_test:
@@ -181,6 +207,10 @@ class Client(object):
 class Report(object):
     """Federated learning client report."""
 
-    def __init__(self, client):
+    def __init__(self, client, weights, loss, delay, throughput):
         self.client_id = client.client_id
         self.num_samples = len(client.data)
+        self.weights = weights
+        self.loss = loss
+        self.delay = delay
+        self.throughput = throughput

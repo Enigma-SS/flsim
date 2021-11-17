@@ -5,10 +5,10 @@
         "label_distribution": "uniform",
         "do_test": false,
         "test_partition": 0.2,
-        "selection": "short_latency_high_loss_first"
+        "selection": "random"
     },
     "data": {
-        "loading": "dynamic",
+        "loading": "static",
         "partition": {
             "size": 600,
             "range": [
@@ -39,7 +39,7 @@
         "reports": "reports.pkl",
         "plot": "./plots"
     },
-    "server": "sync",
+    "server": "async",
     "async_params": {
         "alpha": 0.9,
         "staleness_func": "polynomial"

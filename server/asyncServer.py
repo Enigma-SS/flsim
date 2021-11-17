@@ -1,55 +1,78 @@
 import logging
 import pickle
 import random
-import math
-from threading import Thread
 import torch
 from queue import PriorityQueue
 import os
-from server import Server
+import sys
+from server import Server, gateway
 from .record import Record, Profile
-
-
-class Group(object):
-    """Basic async group."""
-    def __init__(self, client_list):
-        self.clients = client_list
-
-    def set_download_time(self, download_time):
-        self.download_time = download_time
-
-    def set_aggregate_time(self):
-        """Only run after client configuration"""
-        assert (len(self.clients) > 0), "Empty clients in group init!"
-        self.delay = max([c.delay for c in self.clients])
-        self.aggregate_time = self.download_time + self.delay
-
-        # Get average throughput contributed by this group
-        assert (self.clients[0].model_size > 0), "Zero model size in group init!"
-        self.throughput = len(self.clients) * self.clients[0].model_size / \
-                self.delay
-
-    def __eq__(self, other):
-        return self.aggregate_time == other.aggregate_time
-
-    def __ne__(self, other):
-        return self.aggregate_time != other.aggregate_time
-
-    def __lt__(self, other):
-        return self.aggregate_time < other.aggregate_time
-
-    def __le__(self, other):
-        return self.aggregate_time <= other.aggregate_time
-
-    def __gt__(self, other):
-        return self.aggregate_time > other.aggregate_time
-
-    def __ge__(self, other):
-        return self.aggregate_time >= other.aggregate_time
-
+from .asyncEvent import asyncGwEvent
 
 class AsyncServer(Server):
     """Asynchronous federated learning server."""
+
+    def boot(self):
+        logging.info('Booting {} server...'.format(self.config.server))
+
+        model_path = self.config.paths.model
+        total_clients = self.config.clients.total
+        total_gateways = self.config.network.gateway_total
+
+        # Add fl_model to import path
+        sys.path.append(model_path)
+
+        # Set up simulated server
+        self.load_data()
+        self.load_model()
+        self.make_gateways(total_gateways)
+        self.make_clients(total_clients, self.gateways)
+        self.set_link()
+
+        # Initiate client profile of loss and delay
+        self.profile = Profile(total_clients)
+        self.profile.set_primary_label([client.pref for client in self.clients])
+
+    def make_clients(self, num_clients, gateways):
+        super().make_clients(num_clients)
+
+        # Add gateway-client association
+        for client in self.clients:
+            # Randomly associate client with a gateway
+            gateway_id = random.randint(0, len(gateways) - 1)
+            gateways[gateway_id].add_client(client.client_id)
+            client.set_gateway(gateway_id)
+
+    def make_gateways(self, num_gws):
+        gateways = []
+        for gateway_id in range(num_gws):
+            # Create new gateway
+            new_gw = gateway.Gateway(gateway_id, self.config)
+            gateways.append(new_gw)
+
+        self.gateways = gateways
+
+    def set_link(self):
+        # Set the network link between cloud and gateway
+        speed_cloud_gateway = []
+        for gateway in self.gateways:
+            gateway.set_link_to_cloud(self.config)
+            speed_cloud_gateway.append(gateway.speed_mean)
+
+        logging.info('Speed cloud-gw distribution: {} Kbps'.format([s for s in speed_cloud_gateway]))
+
+        speed_gateway_client = []
+        for client in self.clients:
+            client.set_link_to_gateway(self.config)
+            speed_gateway_client.append(client.speed_mean)
+
+        logging.info('Speed distribution: {} Kbps'.format([s for s in speed_gateway_client]))
+
+    def configuration(self, sample_clients, sample_gateways):
+        super().configuration(sample_clients)
+
+        for gateway_id in sample_gateways:
+            self.gateways[gateway_id].configure(self.config, sample_clients)
 
     def load_model(self):
         import fl_model  # pylint: disable=import-error
@@ -67,21 +90,6 @@ class AsyncServer(Server):
         if self.config.paths.reports:
             self.saved_reports = {}
             self.save_reports(0, [])  # Save initial model
-
-    def make_clients(self, num_clients):
-        super().make_clients(num_clients)
-
-        # Set link speed for clients
-        speed = []
-        for client in self.clients:
-            client.set_link(self.config)
-            speed.append(client.speed_mean)
-
-        logging.info('Speed distribution: {} Kbps'.format([s for s in speed]))
-
-        # Initiate client profile of loss and delay
-        self.profile = Profile(num_clients)
-        self.profile.set_primary_label([client.pref for client in self.clients])
 
     # Run asynchronous federated learning
     def run(self):
@@ -130,72 +138,60 @@ class AsyncServer(Server):
         import fl_model  # pylint: disable=import-error
         target_accuracy = self.config.fl.target_accuracy
 
-        # Select clients to participate in the round
-        sample_groups = self.selection()
-        sample_clients = []
-        for group in sample_groups:
-            for client in group.clients:
-                client.set_delay()
-                sample_clients.append(client)
-            group.set_download_time(T_old)
-            group.set_aggregate_time()
-        self.throughput = sum([g.throughput for g in sample_groups])
+        # Select clients and associated gateways to participate in the round
+        # Note, sample_clients and sample_gateways are lists of objects
+        sample_clients, sample_gateways = self.selection()
+        self.total_samples = sum([len(client.data) for client in sample_clients])
 
-        # Put the group into a queue according to its delay in ascending order
-        # Each selected client will complete one local update in this async round
+        # Create a queue at the server to store gateway update events
         queue = PriorityQueue()
+
+        # Create async gateway events
+        events = [asyncGwEvent(sample_clients, gateway, T_old)
+                  for gateway in sample_gateways]
+        for event in events:
+            queue.put(event)
+
         # This async round will end after the slowest group completes one round
-        last_aggregate_time = max([g.aggregate_time for g in sample_groups])
+        last_aggregate_time = max([e.est_aggregate_time for e in events])
 
-        logging.info('Round lasts {} secs, avg throughput {} kB/s'.format(
-            last_aggregate_time, self.throughput
-        ))
-
-        for group in sample_groups:
-            queue.put(group)
+        logging.info('Global async round lasts until {} secs'.format(last_aggregate_time))
 
         # Start the asynchronous updates
         while not queue.empty():
-            select_group = queue.get()
-            select_clients = select_group.clients
-            self.async_configuration(select_clients, select_group.download_time)
+            gwEvent = queue.get()
+            select_gateway, associate_clients = gwEvent.gateway, gwEvent.clients
+            download_time = gwEvent.download_time
 
-            threads = [Thread(target=client.run(reg=True)) for client in select_clients]
-            [t.start() for t in threads]
-            [t.join() for t in threads]
-            T_cur = select_group.aggregate_time  # Update current time
-            logging.info('Training finished on clients {} at time {} s'.format(
-                select_clients, T_cur
-            ))
-
-            # Receive client updates
-            reports = self.reporting(select_clients)
+            self.async_gateway_configuration(select_gateway, associate_clients, download_time)
+            report = select_gateway.async_round(associate_clients, download_time)
+            T_cur = download_time + select_gateway.delay
 
             # Update profile and plot
-            self.update_profile(reports)
+            #self.update_profile(reports)
             # Plot every plot_interval
-            if math.floor(T_cur / self.config.plot_interval) > \
-                    math.floor(T_old / self.config.plot_interval):
-                self.profile.plot(T_cur, self.config.paths.plot)
+            #if math.floor(T_cur / self.config.plot_interval) > \
+            #        math.floor(T_old / self.config.plot_interval):
+            #    self.profile.plot(T_cur, self.config.paths.plot)
 
             # Perform weight aggregation
-            logging.info('Aggregating updates from clients {}'.format(select_clients))
-            staleness = select_group.aggregate_time - select_group.download_time
-            updated_weights = self.aggregation(reports, staleness)
+            logging.info('Aggregating updates from gateway {}'.format(select_gateway))
+            staleness = select_gateway.delay
+            updated_weights = self.federated_async_aggregation(report, staleness)
 
             # Load updated weights
             fl_model.load_weights(self.model, updated_weights)
 
             # Extract flattened weights (if applicable)
             if self.config.paths.reports:
-                self.save_reports(round, reports)
+                self.save_reports(round, report)
 
             # Save updated global model
             self.async_save_model(self.model, self.config.paths.model, T_cur)
 
             # Test global model accuracy
             if self.config.clients.do_test:  # Get average accuracy from client reports
-                accuracy = self.accuracy_averaging(reports)
+                accuracy = self.accuracy_averaging(report)
             else:  # Test updated model on server
                 testset = self.loader.get_testset()
                 batch_size = self.config.fl.batch_size
@@ -212,13 +208,12 @@ class AsyncServer(Server):
 
             # Insert the next aggregation of the group into queue
             # if time permitted
-            if T_cur + select_group.delay < last_aggregate_time:
-                select_group.set_download_time(T_cur)
-                select_group.set_aggregate_time()
-                queue.put(select_group)
+            if T_cur + gwEvent.est_delay < last_aggregate_time:
+                gwEvent.download_time = T_cur
+                gwEvent.est_aggregate_time = T_cur + gwEvent.est_delay
+                queue.put(gwEvent)
 
         return self.records.get_latest_acc(), self.records.get_latest_t()
-
 
     def selection(self):
         # Select devices to participate in round
@@ -232,7 +227,7 @@ class AsyncServer(Server):
 
         elif select_type == 'short_latency_first':
             # Select the clients with short latencies and random loss
-            sample_clients = sorted(self.clients, key=lambda c:c.est_delay)
+            sample_clients = sorted(self.clients, key=lambda c: c.est_delay)
             sample_clients = sample_clients[:clients_per_round]
             print(sample_clients)
 
@@ -254,57 +249,33 @@ class AsyncServer(Server):
             sample_clients = sample_clients[:clients_per_round]
             print(sample_clients)
 
-        # Create one group for each selected client to perform async updates
-        sample_groups = [Group([client]) for client in sample_clients]
+        else:
+            raise ValueError("client select type not implemented: {}".format(select_type))
 
-        return sample_groups
+        # Find out the associated gateways
+        sample_gateways_id = list(set([client.gateway_id for client in sample_clients]))
+        sample_gateways = [self.gateways[gateway_id] for gateway_id in sample_gateways_id]
 
-    def async_configuration(self, sample_clients, download_time):
-        loader_type = self.config.loader
-        loading = self.config.data.loading
+        return sample_clients, sample_gateways
 
-        if loading == 'dynamic':
-            # Create shards if applicable
-            if loader_type == 'shard':
-                self.loader.create_shards()
+    def async_gateway_configuration(self, gateway, associate_clients, download_time):
+        """Download global model to gateway and set up gateway round delay"""
+        gateway.async_global_configure(self.config, associate_clients, download_time)
 
-        # Configure selected clients for federated learning task
-        for client in sample_clients:
-            if loading == 'dynamic':
-                self.set_client_data(client)  # Send data partition to client
 
-            # Extract config for client
-            config = self.config
-
-            # Continue configuration on client
-            client.async_configure(config, download_time)
-
-    def aggregation(self, reports, staleness=None):
-        return self.federated_async(reports, staleness)
-
-    def extract_client_weights(self, reports):
-        # Extract weights from reports
-        weights = [report.weights for report in reports]
-
-        return weights
-
-    def federated_async(self, reports, staleness):
+    def federated_async_aggregation(self, report, staleness):
         import fl_model  # pylint: disable=import-error
 
-        # Extract updates from reports
-        weights = self.extract_client_weights(reports)
-
-        # Extract total number of samples
-        total_samples = sum([report.num_samples for report in reports])
+        # Extract updates from the report
+        weights = report.weights
 
         # Perform weighted averaging
         new_weights = [torch.zeros(x.size())  # pylint: disable=no-member
-                      for _, x in weights[0]]
-        for i, update in enumerate(weights):
-            num_samples = reports[i].num_samples
-            for j, (_, weight) in enumerate(update):
-                # Use weighted average by number of samples
-                new_weights[j] += weight * (num_samples / total_samples)
+                       for _, x in weights[0]]
+        num_samples = report.num_samples
+        for j, (_, weight) in enumerate(weights):
+            # Use weighted average by number of samples
+            new_weights[j] += weight * (num_samples / self.total_samples)
 
         # Extract baseline model weights - latest model
         baseline_weights = fl_model.extract_weights(self.model)
