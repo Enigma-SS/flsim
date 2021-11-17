@@ -117,7 +117,7 @@ class Gateway(object):
 
         # This async round will end after the slowest group completes one round
         last_aggregate_time = max([e.est_aggregate_time for e in events])
-        logging.info('Gateway {} async round lasts until {} secs'.format(
+        logging.info('**** Gateway {} async round lasts until {} secs ****'.format(
             self.gateway_id, last_aggregate_time))
 
         while not queue.empty():
@@ -158,15 +158,8 @@ class Gateway(object):
         import fl_model  # pylint: disable=import-error
 
         # Extract updates from the report
-        weights = report.weights
-
-        # Perform weighted averaging
-        new_weights = [torch.zeros(x.size())  # pylint: disable=no-member
-                      for _, x in weights[0]]
-        num_samples = report.num_samples
-        for j, (_, weight) in enumerate(weights):
-            # Use weighted average by number of samples
-            new_weights[j] += weight * (num_samples / self.total_samples)
+        new_weights = [w for _, w in report.weights]
+        # num_samples = report.num_samples
 
         # Extract baseline model weights - latest model
         baseline_weights = fl_model.extract_weights(self.model)
@@ -209,7 +202,7 @@ class Report(object):
     """Federated learning client report."""
 
     def __init__(self, gateway, weights, sample_clients, finish_time):
-        self.gateway_id = gateway.client_id
+        self.gateway_id = gateway.gateway_id
         self.weights = weights
         self.num_samples = sum([len(client.data) for client in sample_clients])
         self.finish_time = finish_time

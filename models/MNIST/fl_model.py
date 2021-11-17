@@ -80,6 +80,17 @@ def extract_weights(model):
 
     return weights
 
+def extract_weights_tensor(model):
+    weights = None
+    for _, weight in model.named_parameters():
+        if weight.requires_grad:
+            if weights is None:
+                weights = weight.view(-1)
+            else:
+                weights = torch.cat([weights, weight.view(-1)], dim=0)
+
+    return weights
+
 
 def load_weights(model, weights):
     updated_state_dict = {}
@@ -97,13 +108,12 @@ def flatten_weights(weights):
     return np.array(weight_vecs)
 
 def train(model, trainloader, optimizer, epochs, reg=None):
-    model.to(device)
     model.train()
+    model.to(device)
 
     # Get the snapshot of weights when training starts, if regularization is on
     if reg is not None:
-        old_weights = flatten_weights(extract_weights(model))
-        old_weights = torch.from_numpy(old_weights)
+        old_weights = extract_weights_tensor(model)
 
     for epoch in range(1, epochs + 1):
         for batch_id, (image, label) in enumerate(trainloader):
@@ -114,12 +124,9 @@ def train(model, trainloader, optimizer, epochs, reg=None):
 
             # Add regularization
             if reg is not None:
-                new_weights = flatten_weights(extract_weights(model))
-                new_weights = torch.from_numpy(new_weights)
-                mse_loss = nn.MSELoss(reduction='sum')
-                l2_loss = rou/2 * mse_loss(new_weights, old_weights)
-                l2_loss = l2_loss.to(torch.float32)
-                loss += l2_loss
+                new_weights = extract_weights_tensor(model)
+                mse_loss = F.mse_loss(new_weights, old_weights, reduction='sum')
+                loss = loss + rou/2 * mse_loss
 
             loss.backward()
             optimizer.step()
@@ -133,7 +140,7 @@ def train(model, trainloader, optimizer, epochs, reg=None):
 
     if reg is not None:
         logging.info(
-            'loss: {} l2_loss: {}'.format(loss.item(), l2_loss.item()))
+            'loss: {} l2_loss: {}'.format(loss.item(), mse_loss.item()))
     else:
         logging.info(
             'loss: {}'.format(loss.item()))

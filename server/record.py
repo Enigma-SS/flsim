@@ -13,7 +13,7 @@ class Record(object):
         self.alpha = 0.1
         self.last_acc = 0
 
-    def append_record(self, t, acc, throughput):
+    def append_record(self, t, acc, throughput=None):
         self.t.append(t)
         self.throughput.append(throughput)
         if len(self.acc) == 0:

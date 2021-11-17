@@ -354,7 +354,7 @@ class Server(object):
         import fl_model  # pylint: disable=import-error
 
         if reports:
-            self.saved_reports['round{}'.format(round)] = [(report.client_id, self.flatten_weights(
+            self.saved_reports['round{}'.format(round)] = [(report.gateway_id, self.flatten_weights(
                 report.weights)) for report in reports]
 
         # Extract global weights

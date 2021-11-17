@@ -184,7 +184,7 @@ class AsyncServer(Server):
 
             # Extract flattened weights (if applicable)
             if self.config.paths.reports:
-                self.save_reports(round, report)
+                self.save_reports(round, [report])
 
             # Save updated global model
             self.async_save_model(self.model, self.config.paths.model, T_cur)
@@ -198,8 +198,9 @@ class AsyncServer(Server):
                 testloader = fl_model.get_testloader(testset, batch_size)
                 accuracy = fl_model.test(self.model, testloader)
 
-            logging.info('Average accuracy: {:.2f}%\n'.format(100 * accuracy))
-            self.records.append_record(T_cur, accuracy, self.throughput)
+            logging.info('Average accuracy: {:.2f}% at time {} secs\n'.format(
+                100 * accuracy, T_cur))
+            self.records.append_record(T_cur, accuracy)
             # Return when target accuracy is met
             if target_accuracy and \
                     (self.records.get_latest_acc() >= target_accuracy):
@@ -267,15 +268,8 @@ class AsyncServer(Server):
         import fl_model  # pylint: disable=import-error
 
         # Extract updates from the report
-        weights = report.weights
-
-        # Perform weighted averaging
-        new_weights = [torch.zeros(x.size())  # pylint: disable=no-member
-                       for _, x in weights[0]]
-        num_samples = report.num_samples
-        for j, (_, weight) in enumerate(weights):
-            # Use weighted average by number of samples
-            new_weights[j] += weight * (num_samples / self.total_samples)
+        new_weights = [w for _, w in report.weights]
+        # num_samples = report.num_samples
 
         # Extract baseline model weights - latest model
         baseline_weights = fl_model.extract_weights(self.model)
