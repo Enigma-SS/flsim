@@ -128,6 +128,9 @@ class AsyncServer(Server):
                 logging.info('Target accuracy reached.')
                 break
 
+        # Remove all old models
+        self.rm_old_models(self.config.paths.model, T_old + 100)
+
         if reports_path:
             with open(reports_path, 'wb') as f:
                 pickle.dump(self.saved_reports, f)
