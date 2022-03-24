@@ -81,6 +81,7 @@ class Client(object):
         link_speed = random.normalvariate(self.speed_mean, self.speed_std)
         link_speed = max(min(link_speed, self.speed_max), self.speed_min)
         self.delay = self.model_size / link_speed  # upload delay in sec
+        self.throughput = link_speed
 
     def configure(self, config):
         import fl_model  # pylint: disable=import-error

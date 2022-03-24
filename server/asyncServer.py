@@ -80,8 +80,9 @@ class AsyncServer(Server):
         logging.info('Speed distribution: {} Kbps'.format([s for s in speed]))
 
         # Initiate client profile of loss and delay
-        self.profile = Profile(num_clients)
-        self.profile.set_primary_label([client.pref for client in self.clients])
+        self.profile = Profile(num_clients, self.loader.labels)
+        if not self.config.data.IID:
+            self.profile.set_primary_label([client.pref for client in self.clients])
 
     # Run asynchronous federated learning
     def run(self):

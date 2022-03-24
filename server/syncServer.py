@@ -68,11 +68,13 @@ class SyncServer(Server):
 
         # Select clients to participate in the round
         sample_clients = self.selection()
+        for client in sample_clients:
+            client.set_delay()
+        self.throughput = sum([client.throughput for client in sample_clients])
+        logging.info('Avg throughput {} kB/s'.format(self.throughput))
 
         # Configure sample clients
         self.configuration(sample_clients)
-        self.throughput = sum([client.throughput for client in sample_clients])
-        logging.info('Avg throughput {} kB/s'.format(self.throughput))
 
         # Use the max delay in all sample clients as the delay in sync round
         max_delay = max([c.delay for c in sample_clients])
