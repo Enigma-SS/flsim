@@ -6,42 +6,6 @@ from threading import Thread
 from server import Server
 from .record import Record, Profile
 
-class Group(object):
-    """Basic async group."""
-    def __init__(self, client_list):
-        self.clients = client_list
-
-    def set_download_time(self, download_time):
-        self.download_time = download_time
-
-    def set_aggregate_time(self):
-        """Only run after client configuration"""
-        assert (len(self.clients) > 0), "Empty clients in group init!"
-        self.delay = max([c.delay for c in self.clients])
-        self.aggregate_time = self.download_time + self.delay
-
-        # Get average throughput contributed by this group
-        assert (self.clients[0].model_size > 0), "Zero model size in group init!"
-        self.throughput = len(self.clients) * self.clients[0].model_size / \
-                self.aggregate_time
-
-    def __eq__(self, other):
-        return self.aggregate_time == other.aggregate_time
-
-    def __ne__(self, other):
-        return self.aggregate_time != other.aggregate_time
-
-    def __lt__(self, other):
-        return self.aggregate_time < other.aggregate_time
-
-    def __le__(self, other):
-        return self.aggregate_time <= other.aggregate_time
-
-    def __gt__(self, other):
-        return self.aggregate_time > other.aggregate_time
-
-    def __ge__(self, other):
-        return self.aggregate_time >= other.aggregate_time
 
 class SyncServer(Server):
     """Synchronous federated learning server."""
@@ -103,21 +67,13 @@ class SyncServer(Server):
         import fl_model  # pylint: disable=import-error
 
         # Select clients to participate in the round
-        sample_groups = self.selection()
-        sample_clients, throughput = [], []
-        for group in sample_groups:
-            for client in group.clients:
-                client.set_delay()
-                sample_clients.append(client)
-                throughput.append(client.model_size / client.delay)
-            group.set_download_time(T_old)
-            group.set_aggregate_time()
-        self.throughput = sum([t for t in throughput])
-
-        logging.info('Avg throughput {} kB/s'.format(self.throughput))
+        sample_clients = self.selection()
 
         # Configure sample clients
         self.configuration(sample_clients)
+        self.throughput = sum([client.throughput for client in sample_clients])
+        logging.info('Avg throughput {} kB/s'.format(self.throughput))
+
         # Use the max delay in all sample clients as the delay in sync round
         max_delay = max([c.delay for c in sample_clients])
 
@@ -172,10 +128,7 @@ class SyncServer(Server):
         sample_clients = [client for client in random.sample(
             self.clients, clients_per_round)]
 
-        # In sync case, create one group of all selected clients
-        sample_groups = [Group([client for client in sample_clients])]
-
-        return sample_groups
+        return sample_clients
 
     def update_profile(self, reports):
         for report in reports:
