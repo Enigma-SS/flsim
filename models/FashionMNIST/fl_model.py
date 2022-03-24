@@ -163,10 +163,10 @@ def train(model, trainloader, optimizer, epochs, reg=None):
                 return loss.item()
 
     if reg is not None:
-        logging.info(
+        logging.debug(
             'loss: {} l2_loss: {}'.format(loss.item(), l2_loss.item()))
     else:
-        logging.info(
+        logging.debug(
             'loss: {}'.format(loss.item()))
     return loss.item()
 

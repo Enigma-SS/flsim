@@ -179,7 +179,7 @@ class DQN(nn.Module):
         super(DQN, self).__init__()
         self.fc1 = nn.Linear(n_input, n_hidden)
         self.fc2 = nn.Linear(n_hidden, n_output)
-        self.softmax = nn.Softmax(dim=n_output)
+        self.softmax = nn.Softmax(dim=0)
 
     # Called with either one element to determine next action, or a batch
     # during optimization. Returns tensor([[left0exp,right0exp]...]).
@@ -234,6 +234,10 @@ steps_done = 0
 
 
 def select_action(state, policy_net, n_actions, k_select):
+    if torch.cuda.is_available():
+        state = state.cuda()
+    policy_net.eval()
+
     global steps_done
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
@@ -244,10 +248,10 @@ def select_action(state, policy_net, n_actions, k_select):
             # t.max(1) will return largest column value of each row.
             # second column on max result is index of where max element was
             # found, so we pick action with the larger expected reward.
-            return torch.topk(policy_net(state), k_select, dim=1)[1].view(-1).to(device)
+            return torch.topk(policy_net(state), k_select)[1].view(1, -1).to(device)
     else:
         return torch.tensor(
-            random.choice(np.range(n_actions, size=(k_select,), replace=False))
+            np.random.choice(np.arange(n_actions), size=(1, k_select), replace=False)
         ).to(device)
 
 """
@@ -312,10 +316,17 @@ def optimize_model(policy_net, target_net, memory, optimizer):
     action_batch = torch.cat(batch.action)
     reward_batch = torch.cat(batch.reward)
 
+    policy_net.train()
+
     # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
     # columns of actions taken. These are the actions which would've been taken
     # for each batch state according to policy_net
+    if torch.cuda.is_available():
+        state_batch = state_batch.cuda()
+        non_final_next_states = non_final_next_states.cuda()
+    print(policy_net(state_batch).shape, action_batch.shape)
     state_action_values = policy_net(state_batch).gather(1, action_batch)
+    print(state_batch.shape, state_action_values.shape)
 
     # Compute V(s_{t+1}) for all next states.
     # Expected values of actions for non_final_next_states are computed based

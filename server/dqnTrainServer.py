@@ -1,13 +1,11 @@
 import logging
-import pickle
-import random
-import math
 import torch
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from threading import Thread
 from itertools import count
+import matplotlib.pyplot as plt
 import torch.optim as optim
 from server import Server
 from .record import Record, Profile
@@ -18,11 +16,7 @@ use_cuda = torch.cuda.is_available()
 device = torch.device(  # pylint: disable=no-member
     'cuda' if use_cuda else 'cpu')
 
-BATCH_SIZE = 128
 GAMMA = 0.999
-EPS_START = 0.9
-EPS_END = 0.05
-EPS_DECAY = 200
 TARGET_UPDATE = 10
 WEIGHT_PCA_DIM = 100
 
@@ -33,10 +27,10 @@ class DQNTrainServer(Server):
         super().boot()
         total_clients = len(self.clients)
         self.n_actions = total_clients
-        self.policy_net = DQN(n_input=WEIGHT_PCA_DIM*total_clients,
-                              n_output=total_clients)
-        self.target_net = DQN(n_input=WEIGHT_PCA_DIM*total_clients,
-                              n_output=total_clients)
+        self.policy_net = DQN(n_input=WEIGHT_PCA_DIM*(total_clients+1),
+                              n_output=total_clients).to(device=device, dtype=torch.float32)
+        self.target_net = DQN(n_input=WEIGHT_PCA_DIM*(total_clients+1),
+                              n_output=total_clients).to(device=device, dtype=torch.float32)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         self.optimizer = optim.RMSprop(self.policy_net.parameters())
@@ -62,16 +56,22 @@ class DQNTrainServer(Server):
     # Run DQN training
     def run(self):
         num_episodes = 200
+        reward_episode = []
         for i_episode in range(num_episodes):
+            logging.info('Starting episode {}...'.format(i_episode))
             # Init environment for episode
             state = self.episode_init()
+            total_reward = 0.0
 
             # Start the episode
             for t in count():
                 # Select and perform an action
                 action = select_action(state, self.policy_net, self.n_actions,
                                        self.config.clients.per_round)
-                next_state, reward, done = self.step(state, action)
+                logging.info('step {} action {}'.format(t, action.detach().cpu().numpy()))
+                next_state, reward, done = self.step(action)
+                logging.info('step {} reward {}'.format(t, reward.item()))
+                total_reward += np.power(GAMMA, t) * reward
 
                 # Store the transition in memory
                 self.memory.push(state, action, next_state, reward)
@@ -83,14 +83,22 @@ class DQNTrainServer(Server):
                 optimize_model(self.policy_net, self.target_net, self.memory,
                                self.optimizer)
                 if done:
+                    reward_episode.append(total_reward)
                     break
                 # Update the target network, copying all weights and biases in DQN
             if i_episode % TARGET_UPDATE == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
+        fig = plt.figure(figsize=(6, 8))
+        plt.plot(reward_episode)
+        plt.xlabel('Episodes')
+        plt.ylabel('Total Return')
+
     def episode_init(self):
         import fl_model
         # Init the server and state for the current episode
+        _ = [client.set_delay() for client in self.clients]
+        self.configuration(self.clients)
         threads = [Thread(target=client.run) for client in self.clients]
         [t.start() for t in threads]
         [t.join() for t in threads]
@@ -121,7 +129,8 @@ class DQNTrainServer(Server):
         self.pca = PCA(n_components=WEIGHT_PCA_DIM)
         self.pca.fit(self.weights_array_scale)
 
-        state = torch.tensor(self.pca.transform(self.weights_array_scale)).to(device)
+        state = torch.tensor(self.pca.transform(self.weights_array_scale),
+                             device=device, dtype=torch.float32).view(1, -1)
         return state
 
     def step(self, action):
@@ -137,13 +146,14 @@ class DQNTrainServer(Server):
         import fl_model  # pylint: disable=import-error
 
         # Convert state and action to numpy
-        action = action.detach().cpu().numpy()
+        action = action.view(-1).detach().cpu().numpy()
 
         # Configure sample clients
         sample_clients = [self.clients[i] for i in action]
         self.configuration(sample_clients)
         # Use the max delay in all sample clients as the delay in sync round
-        #max_delay = max([c.delay for c in sample_clients])
+        _ = [client.set_delay() for client in sample_clients]
+        max_delay = max([c.delay for c in sample_clients])
 
         # Run clients using multithreading for better parallelism
         threads = [Thread(target=client.run) for client in sample_clients]
@@ -162,7 +172,7 @@ class DQNTrainServer(Server):
         #    self.profile.plot(T_cur, self.config.paths.plot)
 
         # Perform weight aggregation
-        logging.info('Aggregating updates')
+        #logging.info('Aggregating updates')
         updated_weights = self.aggregation(reports)
 
         # Load updated weights
@@ -173,7 +183,8 @@ class DQNTrainServer(Server):
         for report in reports:
             self.weights_array[report.client_id] = self.flatten_weights(report.weights)
         self.weights_array_scale = self.scaler.transform(self.weights_array)
-        next_state = torch.tensor(self.pca.transform(self.weights_array_scale)).to(device)
+        next_state = torch.tensor(self.pca.transform(self.weights_array_scale),
+                                  device=device, dtype=torch.float32).view(1, -1)
 
         # Test global model accuracy
         if self.config.clients.do_test:  # Get average accuracy from client reports

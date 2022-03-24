@@ -238,7 +238,7 @@ class Server(object):
         # Recieve reports from sample clients
         reports = [client.get_report() for client in sample_clients]
 
-        logging.info('Reports recieved: {}'.format(len(reports)))
+        # logging.info('Reports recieved: {}'.format(len(reports)))
         assert len(reports) == len(sample_clients)
 
         return reports
