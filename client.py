@@ -158,11 +158,7 @@ class Client(object):
         grads = fl_model.extract_grads(self.model)
 
         # Generate report for server
-        self.report = Report(self)
-        self.report.weights = weights
-        self.report.grads = grads
-        self.report.loss = self.loss
-        self.report.delay = self.delay
+        self.report = Report(self, weights, grads, self.loss, self.delay)
 
         # Perform model testing if applicable
         if self.do_test:
@@ -177,6 +173,10 @@ class Client(object):
 class Report(object):
     """Federated learning client report."""
 
-    def __init__(self, client):
+    def __init__(self, client, weights, grads, loss, delay):
         self.client_id = client.client_id
         self.num_samples = len(client.data)
+        self.weights = weights
+        self.grads = grads
+        self.loss = loss
+        self.delay = delay

@@ -41,8 +41,8 @@ def main():
         "kcenter": server.KCenterServer(fl_config),
         "kmeans": server.KMeansServer(fl_config),
         "magavg": server.MagAvgServer(fl_config),
-        # "dqn": server.DQNServer(fl_config), # DQN server disabled
-        # "dqntrain": server.DQNTrainServer(fl_config), # DQN server disabled
+        #"dqn": server.DQNServer(fl_config),
+        "dqntrain": server.DQNTrainServer(fl_config),
         "sync": server.SyncServer(fl_config),
         "async": server.AsyncServer(fl_config),
     }[fl_config.server]

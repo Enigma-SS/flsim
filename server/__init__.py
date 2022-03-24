@@ -4,7 +4,7 @@ from .directed import DirectedServer
 from .kcenter import KCenterServer
 from .kmeans import KMeansServer
 from .magavg import MagAvgServer
-# from .dqn import DQNServer # DQN server disbled
-# from .dqn import DQNTrainServer # DQN server disabled
+#from .dqnServer import DQNServer
+from .dqnTrainServer import DQNTrainServer
 from .syncServer import SyncServer
 from .asyncServer import AsyncServer
