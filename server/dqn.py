@@ -324,9 +324,7 @@ def optimize_model(policy_net, target_net, memory, optimizer):
     if torch.cuda.is_available():
         state_batch = state_batch.cuda()
         non_final_next_states = non_final_next_states.cuda()
-    print(policy_net(state_batch).shape, action_batch.shape)
     state_action_values = policy_net(state_batch).gather(1, action_batch)
-    print(state_batch.shape, state_action_values.shape)
 
     # Compute V(s_{t+1}) for all next states.
     # Expected values of actions for non_final_next_states are computed based

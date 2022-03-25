@@ -85,11 +85,13 @@ class DQNTrainServer(Server):
                 if done:
                     reward_episode.append(total_reward)
                     break
-                # Update the target network, copying all weights and biases in DQN
+            # Update the target network, copying all weights and biases in DQN
             if i_episode % TARGET_UPDATE == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
-        fig = plt.figure(figsize=(6, 8))
+        # Save model and plot the training procedure
+        torch.save(self.target_net.state_dict(), self.config.paths.model + './dqn')
+        plt.figure(figsize=(6, 8))
         plt.plot(reward_episode)
         plt.xlabel('Episodes')
         plt.ylabel('Total Return')
