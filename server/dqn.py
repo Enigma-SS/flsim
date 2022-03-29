@@ -211,7 +211,7 @@ class DQN(nn.Module):
 #    episode.
 #
 
-BATCH_SIZE = 128
+MEM_BATCH_SIZE = 64
 GAMMA = 0.999
 EPS_START = 0.9
 EPS_END = 0.05
@@ -298,9 +298,9 @@ def plot_durations():
 #
 
 def optimize_model(policy_net, target_net, memory, optimizer):
-    if len(memory) < BATCH_SIZE:
+    if len(memory) < MEM_BATCH_SIZE:
         return
-    transitions = memory.sample(BATCH_SIZE)
+    transitions = memory.sample(MEM_BATCH_SIZE)
     # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
     # detailed explanation). This converts batch-array of Transitions
     # to Transition of batch-arrays.
@@ -331,7 +331,7 @@ def optimize_model(policy_net, target_net, memory, optimizer):
     # on the "older" target_net; selecting their best reward with max(1)[0].
     # This is merged based on the mask, such that we'll have either the expected
     # state value or 0 in case the state was final.
-    next_state_values = torch.zeros(BATCH_SIZE, device=device)
+    next_state_values = torch.zeros(MEM_BATCH_SIZE, device=device)
     next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch

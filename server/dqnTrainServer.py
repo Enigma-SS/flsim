@@ -1,6 +1,7 @@
 import logging
 import torch
 import numpy as np
+import sys
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from threading import Thread
@@ -24,8 +25,14 @@ class DQNTrainServer(Server):
     """Server for DQN training federated learning server."""
 
     def boot(self):
-        super().boot()
-        total_clients = len(self.clients)
+        logging.info('Booting {} server...'.format(self.config.server))
+
+        model_path = self.config.paths.model
+        total_clients = self.config.clients.total
+
+        # Add fl_model to import path
+        sys.path.append(model_path)
+
         self.n_actions = total_clients
         self.policy_net = DQN(n_input=WEIGHT_PCA_DIM*(total_clients+1),
                               n_output=total_clients).to(device=device, dtype=torch.float32)
@@ -68,9 +75,10 @@ class DQNTrainServer(Server):
                 # Select and perform an action
                 action = select_action(state, self.policy_net, self.n_actions,
                                        self.config.clients.per_round)
-                logging.info('step {} action {}'.format(t, action.detach().cpu().numpy()))
                 next_state, reward, done = self.step(action)
-                logging.info('step {} reward {}'.format(t, reward.item()))
+                logging.info('eps {} step {} action {} reward {}'.format(i_episode, t,
+                                                                         action.detach().cpu().numpy(),
+                                                                         reward.item()))
                 total_reward += np.power(GAMMA, t) * reward
 
                 # Store the transition in memory
@@ -98,6 +106,13 @@ class DQNTrainServer(Server):
 
     def episode_init(self):
         import fl_model
+
+        # Set up simulated server
+        total_clients = self.config.clients.total
+        self.load_data()
+        self.load_model()
+        self.make_clients(total_clients)
+
         # Init the server and state for the current episode
         _ = [client.set_delay() for client in self.clients]
         self.configuration(self.clients)
@@ -179,6 +194,9 @@ class DQNTrainServer(Server):
 
         # Load updated weights
         fl_model.load_weights(self.model, updated_weights)
+
+        # Save updated global model
+        self.save_model(self.model, self.config.paths.model)
 
         # Update state
         self.weights_array[0] = self.flatten_weights(updated_weights)  # global weights
