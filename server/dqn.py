@@ -211,7 +211,7 @@ class DQN(nn.Module):
 #    episode.
 #
 
-MEM_BATCH_SIZE = 64
+MEM_BATCH_SIZE = 128
 GAMMA = 0.999
 EPS_START = 0.9
 EPS_END = 0.05

@@ -91,6 +91,7 @@ class DQNTrainServer(Server):
                 optimize_model(self.policy_net, self.target_net, self.memory,
                                self.optimizer)
                 if done:
+                    logging.info('eps {} total reward {}'.format(i_episode, total_reward.item()))
                     reward_episode.append(total_reward)
                     break
             # Update the target network, copying all weights and biases in DQN
@@ -98,7 +99,7 @@ class DQNTrainServer(Server):
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
         # Save model and plot the training procedure
-        torch.save(self.target_net.state_dict(), self.config.paths.model + './dqn')
+        torch.save(self.target_net.state_dict(), self.config.paths.model + '/dqn')
         plt.figure(figsize=(6, 8))
         plt.plot(reward_episode)
         plt.xlabel('Episodes')
