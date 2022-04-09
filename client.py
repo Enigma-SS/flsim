@@ -59,6 +59,21 @@ class Client(object):
         else:
             self.trainset = data
 
+    # Federated learning phases
+    def set_data_leaf(self, train_data, test_data, config):
+        # Extract from config
+        do_test = self.do_test = config.clients.do_test
+
+        # Download data
+        self.data = self.download(train_data)
+
+        # Extract trainset, testset (if applicable)
+        if do_test:  # Partition for testset if applicable
+            self.trainset = train_data
+            self.testset = test_data
+        else:
+            self.trainset = train_data
+
     def set_link(self, config):
         # Set the Gaussian distribution for link speed in Kbytes
         self.speed_min = config.link.min
@@ -144,24 +159,20 @@ class Client(object):
     def train(self, reg=None):
         import fl_model  # pylint: disable=import-error
 
-        logging.info('Training on client #{}, mean delay {}s'.format(
-            self.client_id, self.delay))
-
         # Perform model training
         trainloader = fl_model.get_trainloader(self.trainset, self.batch_size)
         self.loss = fl_model.train(self.model, trainloader,
-                       self.optimizer, self.epochs, reg)
+                                   self.optimizer, self.epochs, reg)
+
+        logging.info('Training on client #{}, loss {} mean delay {}s'.format(
+            self.client_id, self.loss, self.delay))
 
         # Extract model weights and biases
         weights = fl_model.extract_weights(self.model)
         grads = fl_model.extract_grads(self.model)
 
         # Generate report for server
-        self.report = Report(self)
-        self.report.weights = weights
-        self.report.grads = grads
-        self.report.loss = self.loss
-        self.report.delay = self.delay
+        self.report = Report(self, weights, grads, self.loss, self.delay)
 
         # Perform model testing if applicable
         if self.do_test:
@@ -176,6 +187,11 @@ class Client(object):
 class Report(object):
     """Federated learning client report."""
 
-    def __init__(self, client):
+    def __init__(self, client, weights, grads, loss, delay):
         self.client_id = client.client_id
         self.num_samples = len(client.data)
+        self.weights = weights
+        self.grads = grads
+        self.loss = loss
+        self.delay = delay
+
