@@ -1,31 +1,20 @@
 {
-    "model": "MNIST",
+    "model": "FEMNIST",
     "clients": {
         "total": 50,
-        "per_round": 50,
-        "label_distribution": "uniform",
-        "do_test": false
+        "per_round": 5,
+        "do_test": true
     },
-    "data": {
-        "loading": "static",
-        "partition": {
-            "size": 600
-        },
-        "IID": false,
-        "bias": {
-            "primary": 0.8,
-            "secondary": false
-        }
-    },
+    "data": {},
     "federated_learning": {
-        "rounds": 20,
-        "target_accuracy": 0.99,
+        "rounds": 200,
+        "target_accuracy": 0.95,
         "task": "train",
         "epochs": 5,
         "batch_size": 100
     },
     "paths": {
-        "data": "./data",
+        "data": "../leaf/data/femnist/data",
         "model": "./models"
     },
     "server": "sync",
