@@ -21,7 +21,6 @@ class Server(object):
         logging.info('Booting {} server...'.format(self.config.server))
 
         model_path = self.config.paths.model
-        total_clients = self.config.clients.total
 
         # Add fl_model to import path
         sys.path.append(model_path)
@@ -29,7 +28,12 @@ class Server(object):
         # Set up simulated server
         self.load_data()
         self.load_model()
-        self.make_clients(total_clients)
+        if self.config.loader != 'leaf':
+            num_clients = self.config.clients.total
+            self.make_clients(num_clients)
+        else:
+            num_clients = min(self.config.clients.total, self.loader.num_clients)
+            self.make_clients_leaf(num_clients)
 
     def load_data(self):
         import fl_model  # pylint: disable=import-error
@@ -45,20 +49,22 @@ class Server(object):
         data = generator.generate(data_path)
         labels = generator.labels
 
-        logging.info('Dataset size: {}'.format(
-            sum([len(x) for x in [data[label] for label in labels]])))
-        logging.debug('Labels ({}): {}'.format(
-            len(labels), labels))
+        if self.config.loader != 'leaf':
+            logging.info('Dataset size: {}'.format(
+                sum([len(x) for x in [data[label] for label in labels]])))
+            logging.debug('Labels ({}): {}'.format(
+                len(labels), labels))
 
         # Set up data loader
         self.loader = {
             'basic': load_data.Loader(config, generator),
             'bias': load_data.BiasLoader(config, generator),
-            'shard': load_data.ShardLoader(config, generator)
+            'shard': load_data.ShardLoader(config, generator),
+            'leaf': load_data.LEAFLoader(config, generator)
         }[self.config.loader]
 
-        logging.info('Loader: {}, IID: {}'.format(
-            self.config.loader, self.config.data.IID))
+        logging.info('Loader: {}'.format(self.config.loader))
+
 
     def load_model(self):
         import fl_model  # pylint: disable=import-error
@@ -130,6 +136,37 @@ class Server(object):
 
         self.clients = clients
 
+    def make_clients_leaf(self, num_clients):
+        # Make clients from the leaf dataset
+        clients = []
+        self.select_loader_client = np.random.choice(np.arange(self.loader.num_clients),
+                                                     num_clients, replace=False)
+        for client_id in range(num_clients):
+            # Create new client
+            new_client = client.Client(client_id)
+
+            # Set the client data statically
+            train_data, test_data = self.loader.extract(self.select_loader_client[client_id])
+            new_client.set_data_leaf(
+                train_data,
+                test_data,
+                self.config
+            )
+
+            clients.append(new_client)
+
+        self.clients = clients
+
+        logging.info('Total clients: {} Total samples: {}'.format(num_clients,
+            sum([len(client.data['x']) for client in self.clients])))
+        logging.info('LEAF clients: {} LEAF samples: {}'.format(self.loader.num_clients,
+            sum([len(self.loader.trainset['user_data'][user]['x']) for user in self.loader.trainset['users']])))
+
+        logging.info('Number of train samples on clients: {}'.format(
+            [self.loader.trainset['num_samples'][i] for i in self.select_loader_client]))
+        logging.info('Number of test samples on clients: {}'.format(
+            [self.loader.testset['num_samples'][i] for i in self.select_loader_client]))
+
     # Run federated learning
     def run(self):
         rounds = self.config.fl.rounds
@@ -194,7 +231,10 @@ class Server(object):
         if self.config.clients.do_test:  # Get average accuracy from client reports
             accuracy = self.accuracy_averaging(reports)
         else:  # Test updated model on server
-            testset = self.loader.get_testset()
+            if self.config.loader != 'leaf':
+                testset = self.loader.get_testset()
+            else:
+                testset = self.loader.get_testset(self.select_loader_client)
             batch_size = self.config.fl.batch_size
             testloader = fl_model.get_testloader(testset, batch_size)
             accuracy = fl_model.test(self.model, testloader)
@@ -238,7 +278,7 @@ class Server(object):
         # Recieve reports from sample clients
         reports = [client.get_report() for client in sample_clients]
 
-        # logging.info('Reports recieved: {}'.format(len(reports)))
+        logging.info('Reports received: {}'.format(len(reports)))
         assert len(reports) == len(sample_clients)
 
         return reports

@@ -26,6 +26,23 @@ class SyncServer(Server):
         if not self.config.data.IID:
             self.profile.set_primary_label([client.pref for client in self.clients])
 
+    def make_clients_leaf(self, num_clients):
+        super().make_clients_leaf(num_clients)
+
+        # Set link speed for clients
+        speed = []
+        for client in self.clients:
+            client.set_link(self.config)
+            speed.append(client.speed_mean)
+
+        logging.info('Speed distribution: {} Kbps'.format([s for s in speed]))
+
+        # Initiate client profile of loss and delay
+        self.profile = Profile(num_clients, self.loader.labels)
+        if not self.config.data.IID:
+            self.profile.set_primary_label(
+                [client.pref for client in self.clients])
+
     # Run synchronous federated learning
     def run(self):
         rounds = self.config.fl.rounds
@@ -91,9 +108,9 @@ class SyncServer(Server):
         # Update profile and plot
         self.update_profile(reports)
         # Plot every plot_interval
-        if math.floor(T_cur / self.config.plot_interval) > \
-                math.floor(T_old / self.config.plot_interval):
-            self.profile.plot(T_cur, self.config.paths.plot)
+        #if math.floor(T_cur / self.config.plot_interval) > \
+        #        math.floor(T_old / self.config.plot_interval):
+        #    self.profile.plot(T_cur, self.config.paths.plot)
 
         # Perform weight aggregation
         logging.info('Aggregating updates')
@@ -113,7 +130,10 @@ class SyncServer(Server):
         if self.config.clients.do_test:  # Get average accuracy from client reports
             accuracy = self.accuracy_averaging(reports)
         else:  # Test updated model on server
-            testset = self.loader.get_testset()
+            if self.config.loader != 'leaf':
+                testset = self.loader.get_testset()
+            else:
+                testset = self.loader.get_testset(self.select_loader_client)
             batch_size = self.config.fl.batch_size
             testloader = fl_model.get_testloader(testset, batch_size)
             accuracy = fl_model.test(self.model, testloader)
